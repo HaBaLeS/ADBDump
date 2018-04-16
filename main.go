@@ -7,6 +7,8 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"flag"
+	"strings"
+	"encoding/binary"
 )
 
 
@@ -18,7 +20,10 @@ type Options struct {
 	captureFile string
 }
 
+
+
 var options Options
+
 
 
 func main() {
@@ -26,7 +31,6 @@ func main() {
 	flag.Parse()
 
 	//FIXME introduce logger instead of writing directly anf commandline option to be silent
-
 
 	//TODO dump files
 
@@ -85,21 +89,73 @@ func main() {
 
 }
 
+var (
+	syncInProgress bool = false
+	dataLen uint32 = 0
+
+)
 
 func handlePayload(payload []byte, tcp *layers.TCP) {
+	//	fmt.Println(len(payload))
 	if len(payload) > 0 {
+		line :=string(payload)
+		line = strings.TrimSpace(line)
 		if tcp.DstPort == 5037 { //Snip first 4 bytes
 			payload = payload[4:]
+			if strings.LastIndex(line, "SEND") == 0{
+				dataLen =binary.LittleEndian.Uint32(payload[4:8])
+				color.Red("[ADB]%d\t%s", dataLen,line)
+			} else if strings.LastIndex(line, "DATA") == 0{
+				dataLen =binary.LittleEndian.Uint32(payload[4:8])
+				color.Red("[ADB]:%d\t", dataLen)
+			} else if strings.LastIndex(line, "shell") == 4{
+				color.Red("[ADB][%d]\t%s",tcp.SrcPort,line)
+			} else if strings.LastIndex(line, "host") == 4{
+				color.Red("[ADB]\t%s",line)
+			} else if strings.LastIndex(line, "sync") == 4{
+				color.Red("[ADB]\t%s",line)
+				syncInProgress = true
+			} else if len(payload) > 20 && !syncInProgress {
+				color.Blue("[ADB]\t%s",line[0:20])
+			} else if !syncInProgress {
+				color.Blue("[ADB]\t%s",line[0:8])
+			}
 
-			fmt.Printf("[ADB]\t")
+
 		} else {
-			fmt.Printf("[ANDR]\t")
+			max := 20
+			if len(payload) < max{
+				max = len(payload)
+			}
+			if strings.HasPrefix(line, "INSTRUMENTATION"){
+				color.Green("[ANDR][%d]\t%s", tcp.DstPort, string(line))
+			} else  if strings.HasPrefix(line, "["){
+				color.HiBlack("[ANDR][%d]\t%s", tcp.DstPort, string(line))
+			} else {
+				color.Yellow("[ANDR][%d]\t%s", tcp.DstPort, string(line))
+				if syncInProgress {
+					color.Yellow(string(payload))
+					if len(payload) == 8 {
+						color.Yellow("%d", binary.LittleEndian.Uint32(payload[4:8]))
+						syncInProgress = false
+					}
+
+
+				}
+			}
+
+
 		}
-		max := 80
-		if len(payload) < max{
-			max = len(payload)
+		//max := 20
+		//if len(payload) < max{
+		//	max = len(payload)
+		//}
+
+
+		if strings.Contains(line, "Exception"){
+			//fmt.Println(line)
 		}
-		fmt.Println(string(payload[0:max]))
+
 	}
 }
 
